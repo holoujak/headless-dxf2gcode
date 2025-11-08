@@ -91,7 +91,7 @@ optimization:
 ### Optimization Algorithms
 
 1. **Point Merging**: Eliminates micro-movements by merging nearby points
-2. **Short Segment Removal**: Removes segments shorter than minimum length  
+2. **Short Segment Removal**: Removes segments shorter than minimum length
 3. **Douglas-Peucker Simplification**: Simplifies curves while maintaining precision
 4. **Adaptive Feedrates**: Slower speeds for short segments, full speed for long runs
 
@@ -112,7 +112,7 @@ pre-commit install
 This project uses several tools to maintain code quality:
 
 - **Black**: Code formatting
-- **Flake8**: Linting and style checking  
+- **Flake8**: Linting and style checking
 - **isort**: Import sorting
 - **pytest**: Testing framework
 - **pre-commit**: Git hooks for quality checks
@@ -122,12 +122,12 @@ This project uses several tools to maintain code quality:
 ### Roughing Operations
 ```yaml
 optimization:
-  merge_tolerance: 0.05      # More aggressive  
+  merge_tolerance: 0.05      # More aggressive
   min_segment_length: 0.1    # Remove more small segments
   douglas_peucker_tolerance: 0.05
 ```
 
-### Finishing Operations  
+### Finishing Operations
 ```yaml
 optimization:
   merge_tolerance: 0.005     # More conservative
@@ -143,7 +143,7 @@ python3 headless-dxf2gcode.py input.dxf output.gcode --no-optimize
 ## 🔧 Command Line Options
 
 ```
-usage: headless-dxf2gcode.py [-h] [--config CONFIG] [--origin-lower-left] 
+usage: headless-dxf2gcode.py [-h] [--config CONFIG] [--origin-lower-left]
                             [--plot] [--line-numbers] [--no-optimize] input output
 
 positional arguments:
