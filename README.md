@@ -9,12 +9,13 @@ A headless (command-line) DXF to G-code converter with intelligent optimizations
 ## 🌟 Key Features
 
 - **G-code Optimization**: Reduces machine jerking by up to 50% through advanced path optimization
+- **Contour Ordering**: Automatically mills inner shapes first, outer perimeter last
 - **Continuous Contour Processing**: Groups geometry into continuous paths for smooth machining
 - **Tool Radius Compensation**: Numerical tool offset using Shapely buffer operations
 - **Adaptive Feedrates**: Automatic speed adjustment for different segment lengths
 - **Flexible Configuration**: YAML-based configuration with CLI overrides
 - **Multi-format Support**: Lines, polylines, circles, arcs from DXF files
-- **Visualization**: Optional plotting of original vs. compensated shapes
+- **Visual Feedback**: Interactive plotting with numbered milling sequence visualization
 
 ## 🚀 Quick Start
 
@@ -41,7 +42,7 @@ python3 headless-dxf2gcode.py input.dxf output.gcode
 # Disable optimizations for maximum precision
 python3 headless-dxf2gcode.py input.dxf output.gcode --no-optimize
 
-# Visualize the conversion
+# Visualize the conversion with milling order numbers
 python3 headless-dxf2gcode.py input.dxf output.gcode --plot
 ```
 ## Configuration
@@ -85,6 +86,7 @@ optimization:
   douglas_peucker_tolerance: 0.02   # Curve simplification tolerance (mm)
   adaptive_feedrate: true           # Reduce feedrate for short segments
   min_feed_ratio: 0.3               # Minimum feedrate ratio (30% of normal)
+  sort_by_size: true                # Sort contours by size (inner first, outer last)
   arc_detection: false              # [Future] Convert to G02/G03 arcs
 ```
 
@@ -94,6 +96,7 @@ optimization:
 2. **Short Segment Removal**: Removes segments shorter than minimum length
 3. **Douglas-Peucker Simplification**: Simplifies curves while maintaining precision
 4. **Adaptive Feedrates**: Slower speeds for short segments, full speed for long runs
+5. **Contour Ordering**: Sorts shapes by size to mill inner contours first, outer perimeter last
 
 ## 🛠️ Development
 
@@ -153,10 +156,21 @@ positional arguments:
 options:
   --config CONFIG      YAML config file (default: config.yaml)
   --origin-lower-left  Shift origin to lower-left corner
-  --plot               Show visualization of shapes
+  --plot               Show visualization with milling order numbers
   --line-numbers       Enable N-line numbering
   --no-optimize        Disable G-code optimizations
 ```
+
+## 📊 Visualization
+
+The `--plot` option provides interactive visualization showing:
+
+- **Original geometry** (blue solid lines)
+- **Tool-compensated paths** (red dashed lines)
+- **Milling sequence numbers** (red circles with numbers)
+- **Origin marker** (black cross at 0,0)
+
+Each contour is numbered according to its milling order (smallest to largest area), making it easy to verify the machining sequence before running on your CNC machine.
 
 ## 🧪 Testing
 
