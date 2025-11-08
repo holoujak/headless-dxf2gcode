@@ -67,8 +67,8 @@ z_safe_height: 40         # Safe height for rapid travel
 z_work_height: 1          # Working height for cutting operations
 
 # Tool Configuration
-tool_radius: 5.5          # Radius of cutting tool (mm) - for path compensation
-tool_side: "left"         # Tool compensation: "left" or "right"
+tool_radius: 5.5          # Radius of cutting tool (mm) - set to 0 to disable compensation
+tool_side: "left"         # Tool compensation: "left" or "right" (ignored when radius=0)
 
 # Path Generation
 buffer_resolution: 16     # Segments to approximate rounded corners/curves
@@ -141,6 +141,15 @@ optimization:
 ### Maximum Precision (No Optimization)
 ```bash
 python3 headless-dxf2gcode.py input.dxf output.gcode --no-optimize
+```
+
+### No Tool Compensation (Exact Path Following)
+```yaml
+# Tool follows exact path center - useful for:
+# - Wire EDM operations
+# - Laser cutting/engraving
+# - Plotting/drawing applications
+tool_radius: 0
 ```
 
 ## 🔧 Command Line Options

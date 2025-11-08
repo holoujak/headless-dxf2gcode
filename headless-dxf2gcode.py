@@ -208,6 +208,68 @@ def shift_geometries(geoms: List, dx: float, dy: float) -> List:
 # ------------------------------
 
 
+def optimize_geometries_without_compensation(
+    geoms: List,
+    buffer_resolution: int = 16,
+    join_style: int = 1,
+    merge_tolerance: float = 0.01,
+) -> List[Polygon]:
+    """Optimize geometries without compensation using small buffer smoothing."""
+    optimized_polys = []
+
+    for g in geoms:
+        if isinstance(g, Polygon):
+            optimized_polys.append(g)
+        else:
+            # Apply small buffer for smoothing and converting to polygon
+            # Use merge_tolerance as buffer size for optimization
+            buffer_size = max(merge_tolerance * 2, 0.0001)
+
+            try:
+                # Buffer out and then in to smooth the geometry
+                buffered_out = g.buffer(
+                    buffer_size, resolution=buffer_resolution, join_style=join_style
+                )
+                if not buffered_out.is_empty:
+                    buffered_in = buffered_out.buffer(
+                        -buffer_size,
+                        resolution=buffer_resolution,
+                        join_style=join_style,
+                    )
+
+                    if not buffered_in.is_empty:
+                        if isinstance(buffered_in, Polygon):
+                            optimized_polys.append(buffered_in)
+                        elif hasattr(buffered_in, "geoms"):
+                            for sub in buffered_in.geoms:
+                                if isinstance(sub, Polygon):
+                                    optimized_polys.append(sub)
+                    else:
+                        # Fallback: just tiny buffer to convert to polygon
+                        p = g.buffer(0.0001)
+                        if isinstance(p, Polygon):
+                            optimized_polys.append(p)
+                        elif hasattr(p, "geoms"):
+                            for sub in p.geoms:
+                                if isinstance(sub, Polygon):
+                                    optimized_polys.append(sub)
+            except Exception as e:
+                print(f"Optimization failed for geometry: {e}")
+                # Fallback: tiny buffer
+                try:
+                    p = g.buffer(0.0001)
+                    if isinstance(p, Polygon):
+                        optimized_polys.append(p)
+                    elif hasattr(p, "geoms"):
+                        for sub in p.geoms:
+                            if isinstance(sub, Polygon):
+                                optimized_polys.append(sub)
+                except Exception:
+                    continue
+
+    return optimized_polys
+
+
 def compensate_geometries_with_buffer(
     geoms: List,
     tool_radius: float,
@@ -656,23 +718,16 @@ def main():
             join_style,
         )
     else:
-        # if no compensation requested, convert geoms_shifted into polygons
-        # by buffering with tiny epsilon and taking their outlines
-        compensated_polys = []
-        for g in geoms_shifted:
-            if isinstance(g, Polygon):
-                compensated_polys.append(g)
-            else:
-                # create a very small buffer to get a polygon-like contour
-                # for milling along geometry
-                p = g.buffer(0.0001)
-                if not p.is_empty:
-                    if isinstance(p, Polygon):
-                        compensated_polys.append(p)
-                    else:
-                        for sub in p.geoms:
-                            if isinstance(sub, Polygon):
-                                compensated_polys.append(sub)
+        # no compensation requested, but still apply smoothing optimizations
+        opt_cfg = cfg.get("optimization", {})
+        merge_tolerance = float(opt_cfg.get("merge_tolerance", 0.01))
+
+        compensated_polys = optimize_geometries_without_compensation(
+            geoms_shifted,
+            buffer_resolution,
+            join_style,
+            merge_tolerance,
+        )
 
     # Sort polygons by area if enabled (for consistent milling order)
     opt_cfg = cfg.get("optimization", {})
