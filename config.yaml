@@ -54,4 +54,5 @@ optimization:
   douglas_peucker_tolerance: 0.02 # Curve simplification tolerance - larger = more aggressive (mm)
   adaptive_feedrate: true # Reduce feedrate for very short segments to improve quality
   min_feed_ratio: 0.3 # Minimum feedrate ratio (30% of normal) for short segments
+  sort_by_size: true # Sort contours by size (inner shapes first, outer perimeter last)
   arc_detection: false # [Future feature] Detect circles/arcs and convert to G02/G03

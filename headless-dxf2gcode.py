@@ -743,7 +743,7 @@ def main():
     if args.plot:
         # For plotting original shapes, shift them by minx/miny so both align
         original_shifted = shift_geometries(geoms, minx, miny)
-        plot_polygons(original_shifted, compensated_polys)
+        plot_polygons(original_shifted, compensated_polys_sorted)
 
 
 if __name__ == "__main__":
