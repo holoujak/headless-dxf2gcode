@@ -29,8 +29,8 @@ z_work_height: 1 # Working height for cutting operations
 # ----------------------
 # Tool Configuration
 # ----------------------
-tool_radius: 0 # Radius of the cutting tool (mm) - set to 0 to disable compensation (tool follows exact path center)
-tool_side: "left" # Tool compensation side: "left" or "right" relative to path direction (ignored when tool_radius=0)
+tool_radius: 6 # Radius of the cutting tool (mm) - set to 0 to disable all buffering
+tool_side: "left" # Tool compensation: "left", "right", or "center" (center = buffer smoothing without offset)
 
 # ----------------------
 # Path Generation

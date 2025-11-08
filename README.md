@@ -145,11 +145,15 @@ python3 headless-dxf2gcode.py input.dxf output.gcode --no-optimize
 
 ### No Tool Compensation (Exact Path Following)
 ```yaml
-# Tool follows exact path center - useful for:
-# - Wire EDM operations
-# - Laser cutting/engraving
-# - Plotting/drawing applications
+# Option 1: Zero radius (no smoothing buffer)
 tool_radius: 0
+
+# Option 2: Center mode (with buffer smoothing but no offset)
+tool_radius: 6
+tool_side: "center"  # Buffer out+in for smoothing, returns to original size
+
+# Useful for: Wire EDM, laser cutting, plotting, drawing
+# Note: Optimizations still apply to create smooth continuous paths
 ```
 
 ## 🔧 Command Line Options
