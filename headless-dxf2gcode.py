@@ -41,7 +41,7 @@ except Exception:
 try:
     from shapely.affinity import translate
     from shapely.geometry import LineString, MultiPolygon, Polygon
-    from shapely.ops import unary_union
+    from shapely.ops import linemerge, unary_union
 except Exception:
     print(
         "Missing dependency: shapely. Install with: "
@@ -208,6 +208,171 @@ def shift_geometries(geoms: List, dx: float, dy: float) -> List:
 # ------------------------------
 
 
+def merge_connected_linestrings(geoms: List, tolerance: float = 0.01) -> List:
+    """Merge LineStrings that connect end-to-end into continuous paths."""
+    linestrings = []
+    polygons = []
+
+    # Separate LineStrings from Polygons
+    for g in geoms:
+        if isinstance(g, LineString):
+            linestrings.append(g)
+        elif isinstance(g, Polygon):
+            polygons.append(g)
+
+    if not linestrings:
+        return geoms
+
+    try:
+        # First attempt: direct linemerge
+        merged = linemerge(linestrings)
+
+        # If we still have many separate lines, try buffer approach
+        if hasattr(merged, "geoms") and len(merged.geoms) > len(linestrings) * 0.7:
+            # Too many separate lines, try buffer-based connection
+            print(
+                f"Direct merge produced {len(merged.geoms)} lines from "
+                f"{len(linestrings)}, trying buffer approach"
+            )
+
+            # Create union of all linestrings with small buffer
+            union_geom = unary_union([ls.buffer(tolerance / 2) for ls in linestrings])
+
+            if hasattr(union_geom, "geoms"):
+                # Multiple separate regions
+                result_lines = []
+                for part in union_geom.geoms:
+                    if hasattr(part, "exterior"):
+                        # Convert polygon back to LineString via exterior
+                        result_lines.append(LineString(part.exterior.coords))
+                result_geoms = result_lines + polygons
+            else:
+                # Single connected region
+                if hasattr(union_geom, "exterior"):
+                    result_geoms = [LineString(union_geom.exterior.coords)] + polygons
+                else:
+                    result_geoms = linestrings + polygons
+        else:
+            # linemerge worked well
+            if hasattr(merged, "geoms"):
+                # MultiLineString - multiple disconnected lines
+                result_geoms = list(merged.geoms) + polygons
+            else:
+                # Single LineString - everything connected
+                result_geoms = [merged] + polygons
+
+        return result_geoms
+    except Exception as e:
+        print(f"LineString merging failed: {e}")
+        return geoms
+
+
+def optimize_geometries_without_compensation(
+    geoms: List,
+    buffer_resolution: int = 16,
+    join_style: int = 1,
+    merge_tolerance: float = 0.01,
+) -> List[Polygon]:
+    """Optimize geometries without compensation using small buffer smoothing."""
+    # First, try to merge connected LineStrings into continuous paths
+    merged_geoms = merge_connected_linestrings(geoms, merge_tolerance)
+
+    optimized_polys = []
+
+    for g in merged_geoms:
+        if isinstance(g, Polygon):
+            optimized_polys.append(g)
+        else:
+            # Apply small buffer for smoothing and converting to polygon
+            # Use merge_tolerance as buffer size for optimization
+            buffer_size = max(merge_tolerance * 2, 0.0001)
+
+            try:
+                # Buffer out and then in to smooth the geometry
+                buffered_out = g.buffer(
+                    buffer_size, resolution=buffer_resolution, join_style=join_style
+                )
+                if not buffered_out.is_empty:
+                    buffered_in = buffered_out.buffer(
+                        -buffer_size,
+                        resolution=buffer_resolution,
+                        join_style=join_style,
+                    )
+
+                    if not buffered_in.is_empty:
+                        if isinstance(buffered_in, Polygon):
+                            optimized_polys.append(buffered_in)
+                        elif hasattr(buffered_in, "geoms"):
+                            for sub in buffered_in.geoms:
+                                if isinstance(sub, Polygon):
+                                    optimized_polys.append(sub)
+                    else:
+                        # Fallback: just tiny buffer to convert to polygon
+                        p = g.buffer(0.0001)
+                        if isinstance(p, Polygon):
+                            optimized_polys.append(p)
+                        elif hasattr(p, "geoms"):
+                            for sub in p.geoms:
+                                if isinstance(sub, Polygon):
+                                    optimized_polys.append(sub)
+            except Exception as e:
+                print(f"Optimization failed for geometry: {e}")
+                # Fallback: tiny buffer
+                try:
+                    p = g.buffer(0.0001)
+                    if isinstance(p, Polygon):
+                        optimized_polys.append(p)
+                    elif hasattr(p, "geoms"):
+                        for sub in p.geoms:
+                            if isinstance(sub, Polygon):
+                                optimized_polys.append(sub)
+                except Exception:
+                    continue
+
+    # Merge overlapping/touching polygons to create continuous contours
+    if not optimized_polys:
+        return []
+
+    try:
+        merged = unary_union(optimized_polys)
+        polys = []
+        if isinstance(merged, Polygon):
+            polys = [merged]
+        else:
+            for p in merged.geoms:
+                if isinstance(p, Polygon):
+                    polys.append(p)
+        return polys
+    except Exception:
+        # fallback to original polygons
+        return optimized_polys
+
+
+def apply_buffer_to_geometry(geom, radius, side, resolution=16, join_style=1):
+    """Apply appropriate buffer operation based on tool side and radius.
+
+    Args:
+        geom: Shapely geometry (LineString or Polygon)
+        radius: Tool radius in mm
+        side: Tool compensation side ("left", "right", "center")
+        resolution: Buffer resolution for curves
+        join_style: Corner join style (1=round, 2=mitre, 3=bevel)
+
+    Returns:
+        Buffered geometry
+    """
+    if radius == 0 or side == "center":
+        # No buffering - convert LineString to tiny polygon for consistency
+        if isinstance(geom, LineString):
+            return geom.buffer(0.0001)  # Tiny buffer to create polygon
+        else:
+            return geom
+    else:
+        # Normal compensation (left/right)
+        sign = 1 if side == "left" else -1
+        return geom.buffer(sign * radius, resolution=resolution, join_style=join_style)
+
+
 def compensate_geometries_with_buffer(
     geoms: List,
     tool_radius: float,
@@ -220,15 +385,13 @@ def compensate_geometries_with_buffer(
     join_style: 1=round, 2=mitre, 3=bevel (shapely conventions differ:
     actually 1 round, 2 mitre, 3 bevel)
     """
-    if tool_radius == 0:
-        return geoms
-    sign = 1 if (tool_side == "left") else -1
     buffered = []
     for g in geoms:
         try:
-            b = g.buffer(
-                sign * tool_radius, resolution=buffer_resolution, join_style=join_style
+            b = apply_buffer_to_geometry(
+                g, tool_radius, tool_side, buffer_resolution, join_style
             )
+
             if b.is_empty:
                 continue
             if isinstance(b, (Polygon, MultiPolygon)):
@@ -647,32 +810,13 @@ def main():
     buffer_resolution = int(cfg.get("buffer_resolution", 16))
     join_style = int(cfg.get("join_style", 1))
 
-    if tool_radius != 0:
-        compensated_polys = compensate_geometries_with_buffer(
-            geoms_shifted,
-            tool_radius,
-            tool_side,
-            buffer_resolution,
-            join_style,
-        )
-    else:
-        # if no compensation requested, convert geoms_shifted into polygons
-        # by buffering with tiny epsilon and taking their outlines
-        compensated_polys = []
-        for g in geoms_shifted:
-            if isinstance(g, Polygon):
-                compensated_polys.append(g)
-            else:
-                # create a very small buffer to get a polygon-like contour
-                # for milling along geometry
-                p = g.buffer(0.0001)
-                if not p.is_empty:
-                    if isinstance(p, Polygon):
-                        compensated_polys.append(p)
-                    else:
-                        for sub in p.geoms:
-                            if isinstance(sub, Polygon):
-                                compensated_polys.append(sub)
+    compensated_polys = compensate_geometries_with_buffer(
+        geoms_shifted,
+        tool_radius,
+        tool_side,
+        buffer_resolution,
+        join_style,
+    )
 
     # Sort polygons by area if enabled (for consistent milling order)
     opt_cfg = cfg.get("optimization", {})

@@ -29,8 +29,8 @@ z_work_height: 1 # Working height for cutting operations
 # ----------------------
 # Tool Configuration
 # ----------------------
-tool_radius: 5.5 # Radius of the cutting tool (mm) - used for path compensation
-tool_side: "left" # Tool compensation side: "left" or "right" relative to path direction
+tool_radius: 6 # Radius of the cutting tool (mm) - set to 0 to disable all buffering
+tool_side: "left" # Tool compensation: "left", "right", or "center" (center = buffer smoothing without offset)
 
 # ----------------------
 # Path Generation
@@ -45,11 +45,11 @@ line_numbers: true # Add line numbers (N codes) to G-code output
 line_number_increment: 10 # Increment between line numbers (N10, N20, N30, etc.)
 
 # ----------------------
-# Optimization Settings
+# Optimization Settings (work even with tool_radius=0)
 # ----------------------
 optimization:
   enable: true # Master switch - enable/disable all optimizations
-  merge_tolerance: 0.01 # Merge points closer than this distance (mm)
+  merge_tolerance: 0.01 # Merge points closer than this distance (mm) - also used for smoothing without compensation
   min_segment_length: 0.05 # Remove line segments shorter than this (mm)
   douglas_peucker_tolerance: 0.02 # Curve simplification tolerance - larger = more aggressive (mm)
   adaptive_feedrate: true # Reduce feedrate for very short segments to improve quality
