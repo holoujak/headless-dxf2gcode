@@ -1,0 +1,57 @@
+# ==============================================================================
+# Headless DXF2GCode Configuration File
+# ==============================================================================
+
+# ----------------------
+# File Input/Output
+# ----------------------
+preamble: "start.gcode" # G-code file to insert at the beginning (setup, spindle on, etc.)
+postamble: "end.gcode" # G-code file to insert at the end (spindle off, return home, etc.)
+
+# ----------------------
+# Coordinate System
+# ----------------------
+origin_lower_left: true # Shift origin to lower-left corner of the drawing bounds
+
+# ----------------------
+# Feed Rates (mm/min)
+# ----------------------
+feed_rate: 5 # Default cutting feedrate for X/Y movements
+z_approach_feed: 3 # Feedrate when plunging down to work height
+z_travel_feed: 5 # Feedrate when lifting to safe height
+
+# ----------------------
+# Z-Axis Heights (mm)
+# ----------------------
+z_safe_height: 40 # Safe height for rapid travel (above all obstacles)
+z_work_height: 1 # Working height for cutting operations
+
+# ----------------------
+# Tool Configuration
+# ----------------------
+tool_radius: 5.5 # Radius of the cutting tool (mm) - used for path compensation
+tool_side: "left" # Tool compensation side: "left" or "right" relative to path direction
+
+# ----------------------
+# Path Generation
+# ----------------------
+buffer_resolution: 16 # Number of segments to approximate rounded corners/curves
+join_style: 1 # Corner join style: 1=round, 2=mitre, 3=bevel
+
+# ----------------------
+# G-code Formatting
+# ----------------------
+line_numbers: true # Add line numbers (N codes) to G-code output
+line_number_increment: 10 # Increment between line numbers (N10, N20, N30, etc.)
+
+# ----------------------
+# Optimization Settings
+# ----------------------
+optimization:
+  enable: true # Master switch - enable/disable all optimizations
+  merge_tolerance: 0.01 # Merge points closer than this distance (mm)
+  min_segment_length: 0.05 # Remove line segments shorter than this (mm)
+  douglas_peucker_tolerance: 0.02 # Curve simplification tolerance - larger = more aggressive (mm)
+  adaptive_feedrate: true # Reduce feedrate for very short segments to improve quality
+  min_feed_ratio: 0.3 # Minimum feedrate ratio (30% of normal) for short segments
+  arc_detection: false # [Future feature] Detect circles/arcs and convert to G02/G03

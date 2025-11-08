@@ -1,0 +1,8 @@
+(<< startup >>)
+G00 T00 Z180.00  G60 G138
+P1=14 P5=98.0
+L .UPWZW
+G92 G91 X3.00 Y3.00
+G90
+G00 T14 X0.00   Y0.00   Z50.00   G40 G60 M15 S100  M03
+(<< startup end >>)
