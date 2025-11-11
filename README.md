@@ -37,13 +37,13 @@ pip install -e .
 
 ```bash
 # Convert DXF to G-code with optimizations
-python3 headless-dxf2gcode.py input.dxf output.gcode
+headless-dxf2gcode input.dxf output.gcode
 
 # Disable optimizations for maximum precision
-python3 headless-dxf2gcode.py input.dxf output.gcode --no-optimize
+headless-dxf2gcode input.dxf output.gcode --no-optimize
 
 # Visualize the conversion with milling order numbers
-python3 headless-dxf2gcode.py input.dxf output.gcode --plot
+headless-dxf2gcode input.dxf output.gcode --plot
 ```
 ## Configuration
 
@@ -140,7 +140,7 @@ optimization:
 
 ### Maximum Precision (No Optimization)
 ```bash
-python3 headless-dxf2gcode.py input.dxf output.gcode --no-optimize
+headless-dxf2gcode input.dxf output.gcode --no-optimize
 ```
 
 ### No Tool Compensation (Exact Path Following)
@@ -159,8 +159,8 @@ tool_side: "center"  # Buffer out+in for smoothing, returns to original size
 ## 🔧 Command Line Options
 
 ```
-usage: headless-dxf2gcode.py [-h] [--config CONFIG] [--origin-lower-left]
-                            [--plot] [--line-numbers] [--no-optimize] input output
+usage: headless-dxf2gcode [-h] [--config CONFIG] [--origin-lower-left]
+                          [--plot] [--line-numbers] [--no-optimize] input output
 
 positional arguments:
   input                Input DXF file

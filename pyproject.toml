@@ -7,7 +7,7 @@ name = "headless-dxf2gcode"
 version = "1.0.0"
 description = "Headless DXF to G-code converter with intelligent optimizations"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Jakub Holoubek", email = "jakub.holoubek@gmail.com"}
 ]
@@ -18,7 +18,6 @@ keywords = ["dxf", "gcode", "cnc", "machining", "optimization"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Manufacturing",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
@@ -53,14 +52,14 @@ Issues = "https://github.com/holoujak/headless-dxf2gcode/issues"
 Documentation = "https://github.com/holoujak/headless-dxf2gcode/blob/master/README.md"
 
 [project.scripts]
-headless-dxf2gcode = "headless_dxf2gcode:main"
+headless-dxf2gcode = "headless_dxf2gcode.main:main"
 
 [tool.setuptools]
-packages = ["headless-dxf2gcode"]
+packages = ["headless_dxf2gcode"]
 package-dir = {"" = "."}
 
 [tool.setuptools.package-data]
-headless-dxf2gcode = ["*.yaml", "*.gcode"]
+headless_dxf2gcode = ["*.yaml", "*.gcode"]
 
 [tool.black]
 line-length = 88
@@ -84,11 +83,11 @@ extend-exclude = '''
 profile = "black"
 multi_line_output = 3
 line_length = 88
-known_first_party = ["headless-dxf2gcode"]
+known_first_party = ["headless_dxf2gcode"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q --strict-markers --cov=headless-dxf2gcode --cov-report=term-missing"
+addopts = "-ra -q --strict-markers --cov=headless_dxf2gcode --cov-report=term-missing"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
