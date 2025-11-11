@@ -23,9 +23,11 @@ On Arch Linux prefer installing system packages where available, or use a venv.
 """
 
 import argparse
+import glob
 import math
 import os
 import sys
+from pathlib import Path
 from typing import List, Tuple
 
 try:
@@ -742,6 +744,143 @@ def plot_polygons(original_geoms, compensated_polys, sorted_polys=None):
 
 
 # ------------------------------
+# File processing
+# ------------------------------
+
+
+def process_single_file(
+    input_file: str, output_file: str, config: dict, plot: bool = False
+):
+    """Process single DXF file and generate G-code output."""
+    # extract geometries
+    geoms = extract_geometries(input_file)
+    if not geoms:
+        print("No supported geometry found in DXF")
+        return
+
+    # compute bbox offset
+    minx, miny = compute_bbox_offset(geoms, config.get("origin_lower_left", False))
+
+    # shift all geometries the same way
+    geoms_shifted = shift_geometries(geoms, minx, miny)
+
+    # compensate using shapely.buffer to keep contours continuous
+    tool_radius = float(config.get("tool_radius", 0) or 0)
+    tool_side = config.get("tool_side", "left")
+    buffer_resolution = int(config.get("buffer_resolution", 16))
+    join_style = int(config.get("join_style", 1))
+
+    compensated_polys = compensate_geometries_with_buffer(
+        geoms_shifted,
+        tool_radius,
+        tool_side,
+        buffer_resolution,
+        join_style,
+    )
+
+    # Sort polygons by area if enabled (for consistent milling order)
+    opt_cfg = config.get("optimization", {})
+    sort_by_size = opt_cfg.get("sort_by_size", True)
+
+    if sort_by_size:
+        compensated_polys_sorted = sorted(compensated_polys, key=lambda p: p.area)
+    else:
+        compensated_polys_sorted = compensated_polys
+
+    # generate gcode lines
+    enable_ln = bool(config.get("line_numbers", False))
+    line_inc = int(config.get("line_number_increment", 10))
+
+    # start with optional preamble content
+    header_lines = []
+    if config.get("preamble"):
+        if os.path.exists(config["preamble"]):
+            with open(config["preamble"], "r", encoding="utf-8") as f:
+                header_lines.extend([ln.rstrip("\n") for ln in f.readlines()])
+        else:
+            header_lines.append(
+                f"(WARNING: preamble file not found: {config['preamble']})"
+            )
+
+    footer_lines = []
+    if config.get("postamble"):
+        if os.path.exists(config["postamble"]):
+            with open(config["postamble"], "r", encoding="utf-8") as f:
+                footer_lines.extend([ln.rstrip("\n") for ln in f.readlines()])
+        else:
+            footer_lines.append(
+                f"(WARNING: postamble file not found: {config['postamble']})"
+            )
+
+    body_lines = generate_gcode_from_polygons(
+        compensated_polys_sorted,
+        config,
+        enable_line_numbers=enable_ln,
+        line_inc=line_inc,
+    )
+
+    # assemble final lines: header, body, footer
+    final_lines = []
+    # apply line numbering to pre/post if requested
+    if header_lines:
+        if enable_ln:
+            ln_base = 10
+            for i, hl in enumerate(header_lines):
+                final_lines.append(f"N{ln_base + i * line_inc:04d} {hl}")
+            # ensure body starts after header numbers - but
+            # generate_gcode_from_polygons already started at N10;
+            # keep it simple and just concatenate
+            final_lines.extend(body_lines)
+        else:
+            final_lines.extend(header_lines)
+    else:
+        final_lines.extend(body_lines)
+
+    if footer_lines:
+        final_lines.extend(footer_lines)
+
+    # write to file
+    with open(output_file, "w", encoding="utf-8") as f:
+        for row in final_lines:
+            f.write(str(row).rstrip("\n") + "\n")
+
+    print(f"Saved G-code to: {output_file}")
+
+    # plotting
+    if plot:
+        # For plotting original shapes, shift them by minx/miny so both align
+        original_shifted = shift_geometries(geoms, minx, miny)
+        plot_polygons(original_shifted, compensated_polys_sorted)
+
+
+def process_bulk(input_dir: Path, output_dir: Path, config: dict):
+    """Process all DXF files in input directory."""
+    dxf_files = glob.glob(str(input_dir / "*.dxf"))
+
+    if not dxf_files:
+        print(f"No DXF files found in {input_dir}")
+        return
+
+    # Get output extension from config
+    output_ext = config.get("output_extension", "")
+
+    print(f"Processing {len(dxf_files)} DXF files...")
+
+    for dxf_file in dxf_files:
+        input_file = Path(dxf_file)
+        # Generate output filename with configured extension
+        output_file = output_dir / (input_file.stem + output_ext)
+
+        print(f"Processing: {input_file.name} -> {output_file.name}")
+
+        try:
+            process_single_file(str(input_file), str(output_file), config, plot=False)
+            print("  Success")
+        except Exception as e:
+            print(f"  Error: {e}")
+
+
+# ------------------------------
 # Main
 # ------------------------------
 
@@ -780,114 +919,37 @@ def main():
     )
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    config = load_config(args.config)
 
     # CLI overrides
     if args.origin_lower_left:
-        cfg["origin_lower_left"] = True
+        config["origin_lower_left"] = True
     if args.line_numbers:
-        cfg["line_numbers"] = True
+        config["line_numbers"] = True
     if args.no_optimize:
-        if "optimization" not in cfg:
-            cfg["optimization"] = {}
-        cfg["optimization"]["enable"] = False
+        if "optimization" not in config:
+            config["optimization"] = {}
+        config["optimization"]["enable"] = False
 
-    # extract geometries
-    geoms = extract_geometries(args.input)
-    if not geoms:
-        print("No supported geometry found in DXF")
-        return
+    # Detect if we're in bulk mode (directories) or single file mode
+    input_path = Path(args.input)
+    output_path = Path(args.output)
 
-    # compute bbox offset
-    minx, miny = compute_bbox_offset(geoms, cfg.get("origin_lower_left", False))
+    if input_path.is_dir() and output_path.is_dir():
+        # Bulk processing mode
+        if args.plot:
+            print("Error: --plot option is not supported in bulk processing mode")
+            sys.exit(1)
 
-    # shift all geometries the same way
-    geoms_shifted = shift_geometries(geoms, minx, miny)
+        process_bulk(input_path, output_path, config)
 
-    # compensate using shapely.buffer to keep contours continuous
-    tool_radius = float(cfg.get("tool_radius", 0) or 0)
-    tool_side = cfg.get("tool_side", "left")
-    buffer_resolution = int(cfg.get("buffer_resolution", 16))
-    join_style = int(cfg.get("join_style", 1))
+    elif input_path.is_file() and not output_path.is_dir():
+        # Single file mode
+        process_single_file(args.input, args.output, config, args.plot)
 
-    compensated_polys = compensate_geometries_with_buffer(
-        geoms_shifted,
-        tool_radius,
-        tool_side,
-        buffer_resolution,
-        join_style,
-    )
-
-    # Sort polygons by area if enabled (for consistent milling order)
-    opt_cfg = cfg.get("optimization", {})
-    sort_by_size = opt_cfg.get("sort_by_size", True)
-
-    if sort_by_size:
-        compensated_polys_sorted = sorted(compensated_polys, key=lambda p: p.area)
     else:
-        compensated_polys_sorted = compensated_polys
-
-    # generate gcode lines
-    enable_ln = bool(cfg.get("line_numbers", False))
-    line_inc = int(cfg.get("line_number_increment", 10))
-
-    # start with optional preamble content
-    header_lines = []
-    if cfg.get("preamble"):
-        if os.path.exists(cfg["preamble"]):
-            with open(cfg["preamble"], "r", encoding="utf-8") as f:
-                header_lines.extend([ln.rstrip("\n") for ln in f.readlines()])
-        else:
-            header_lines.append(
-                f"(WARNING: preamble file not found: {cfg['preamble']})"
-            )
-
-    footer_lines = []
-    if cfg.get("postamble"):
-        if os.path.exists(cfg["postamble"]):
-            with open(cfg["postamble"], "r", encoding="utf-8") as f:
-                footer_lines.extend([ln.rstrip("\n") for ln in f.readlines()])
-        else:
-            footer_lines.append(
-                f"(WARNING: postamble file not found: {cfg['postamble']})"
-            )
-
-    body_lines = generate_gcode_from_polygons(
-        compensated_polys_sorted, cfg, enable_line_numbers=enable_ln, line_inc=line_inc
-    )
-
-    # assemble final lines: header, body, footer
-    final_lines = []
-    # apply line numbering to pre/post if requested
-    if header_lines:
-        if enable_ln:
-            ln_base = 10
-            for i, hl in enumerate(header_lines):
-                final_lines.append(f"N{ln_base + i * line_inc:04d} {hl}")
-            # ensure body starts after header numbers - but
-            # generate_gcode_from_polygons already started at N10;
-            # keep it simple and just concatenate
-            final_lines.extend(body_lines)
-        else:
-            final_lines.extend(header_lines)
-    else:
-        final_lines.extend(body_lines)
-
-    if footer_lines:
-        final_lines.extend(footer_lines)
-
-    # write to file
-    with open(args.output, "w", encoding="utf-8") as f:
-        for row in final_lines:
-            f.write(str(row).rstrip("\n") + "\n")
-
-    print(f"Saved G-code to: {args.output}")
-
-    # plotting
-    if args.plot:
-        # For plotting original shapes, shift them by minx/miny so both align
-        original_shifted = shift_geometries(geoms, minx, miny)
-        plot_polygons(original_shifted, compensated_polys_sorted)
+        print("Error: Both arguments must be either files or directories")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
