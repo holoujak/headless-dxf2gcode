@@ -7,6 +7,7 @@
 # ----------------------
 preamble: "start.gcode" # G-code file to insert at the beginning (setup, spindle on, etc.)
 postamble: "end.gcode" # G-code file to insert at the end (spindle off, return home, etc.)
+output_extension: "" # Extension for output G-code files
 
 # ----------------------
 # Coordinate System
