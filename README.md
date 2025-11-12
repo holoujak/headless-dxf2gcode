@@ -64,11 +64,13 @@ z_travel_feed: 5          # Feedrate when lifting to safe height
 
 # Z-Axis Heights (mm)
 z_safe_height: 40         # Safe height for rapid travel
+z_material_height: 18     # Top surface of the material being cut
 z_work_height: 1          # Working height for cutting operations
 
 # Tool Configuration
-tool_radius: 5.5          # Radius of cutting tool (mm) - set to 0 to disable compensation
-tool_side: "left"         # Tool compensation: "left" or "right" (ignored when radius=0)
+tool_radius: 5.5               # Radius of cutting tool (mm) - set to 0 to disable compensation
+tool_side: "left"              # Tool compensation: "left" or "right" (ignored when radius=0)
+tool_max_cut_depth_per_pass: 9 # Maximum cut depth per pass (mm)
 
 # Path Generation
 buffer_resolution: 16     # Segments to approximate rounded corners/curves
