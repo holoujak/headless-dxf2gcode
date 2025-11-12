@@ -585,9 +585,11 @@ def generate_gcode_from_polygons(
     # Basic settings
     z_safe = cfg.get("z_safe_height", 5)
     z_work = cfg.get("z_work_height", -1)
+    z_material_height = cfg.get("z_material_height", 0)
     z_approach = cfg.get("z_approach_feed", 300)
     z_travel = cfg.get("z_travel_feed", 1500)
     base_feed = cfg.get("feed_rate", 1000)
+    max_cut_depth = cfg.get("tool_max_cut_depth_per_pass", 1.0)
 
     # Optimization settings
     opt_cfg = cfg.get("optimization", {})
@@ -611,53 +613,64 @@ def generate_gcode_from_polygons(
     else:
         emit(f"(Processing {len(polygons)} contours in original order)")
 
-    for i, poly in enumerate(polygons, 1):
-        emit(f"(Contour {i}: area = {poly.area:.2f} mm²)")
+    current_height = max(z_material_height - max_cut_depth, z_work)
+    while current_height >= z_work:
+        for i, poly in enumerate(polygons, 1):
+            emit(f"(Contour {i}: area = {poly.area:.2f} mm²)")
+            emit(
+                f"(Depth pass at Z = {current_height:.4f} mm, "
+                f"material height = {z_material_height} mm)"
+            )
 
-        # We'll mill polygon exterior as one continuous contour
-        exterior = list(poly.exterior.coords)
-        if len(exterior) < 2:
-            continue
-
-        # Apply optimizations if enabled
-        if optimization_enabled:
-            # Step 1: Merge close points
-            exterior = merge_close_points(exterior, merge_tolerance)
-
-            # Step 2: Remove very short segments
-            exterior = remove_short_segments(exterior, min_segment_length)
-
-            # Step 3: Simplify using Douglas-Peucker
-            exterior = douglas_peucker_simplify(exterior, douglas_peucker_tolerance)
-
+            # We'll mill polygon exterior as one continuous contour
+            exterior = list(poly.exterior.coords)
             if len(exterior) < 2:
                 continue
 
-        # Move to safe height and XY start
-        x0, y0 = exterior[0]
-        emit(f"G0 Z{z_safe:.3f} F{z_travel}")
-        emit(f"G0 X{x0:.4f} Y{y0:.4f} F{z_travel}")
-        emit(f"G1 Z{z_work:.4f} F{z_approach}")
+            # Apply optimizations if enabled
+            if optimization_enabled:
+                # Step 1: Merge close points
+                exterior = merge_close_points(exterior, merge_tolerance)
 
-        # Follow exterior points with adaptive feedrate
-        prev_x, prev_y = x0, y0
+                # Step 2: Remove very short segments
+                exterior = remove_short_segments(exterior, min_segment_length)
 
-        for x, y in exterior[1:]:
-            # Calculate feedrate based on segment length if adaptive mode is enabled
-            if optimization_enabled and adaptive_feedrate:
-                segment_length = math.sqrt((x - prev_x) ** 2 + (y - prev_y) ** 2)
-                current_feed = calculate_segment_feedrate(
-                    segment_length, base_feed, min_feed_ratio
-                )
-                emit(f"G1 X{x:.4f} Y{y:.4f} F{current_feed:.0f}")
-            else:
-                emit(f"G1 X{x:.4f} Y{y:.4f} F{base_feed}")
+                # Step 3: Simplify using Douglas-Peucker
+                exterior = douglas_peucker_simplify(exterior, douglas_peucker_tolerance)
 
-            prev_x, prev_y = x, y
+                if len(exterior) < 2:
+                    continue
 
-        # Retract
-        emit(f"G0 Z{z_safe:.3f} F{z_travel}")
+            # Move to safe height and XY start
+            x0, y0 = exterior[0]
+            emit(f"G0 Z{z_safe:.3f} F{z_travel}")
+            emit(f"G0 X{x0:.4f} Y{y0:.4f} F{z_travel}")
+            emit(f"G1 Z{current_height:.4f} F{z_approach}")
 
+            # Follow exterior points with adaptive feedrate
+            prev_x, prev_y = x0, y0
+
+            for x, y in exterior[1:]:
+                # Calculate feedrate based on segment length if adaptive mode is enabled
+                if optimization_enabled and adaptive_feedrate:
+                    segment_length = math.sqrt((x - prev_x) ** 2 + (y - prev_y) ** 2)
+                    current_feed = calculate_segment_feedrate(
+                        segment_length, base_feed, min_feed_ratio
+                    )
+                    emit(f"G1 X{x:.4f} Y{y:.4f} F{current_feed:.0f}")
+                else:
+                    emit(f"G1 X{x:.4f} Y{y:.4f} F{base_feed}")
+
+                prev_x, prev_y = x, y
+
+            # Retract
+            emit(f"G0 Z{z_safe:.3f} F{z_travel}")
+
+        # Next depth pass
+        if current_height == z_work:
+            break
+        else:
+            current_height = max(current_height - max_cut_depth, z_work)
     # footer
     if optimization_enabled:
         emit("(Optimization complete)")
