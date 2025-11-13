@@ -70,20 +70,53 @@ except Exception:
     _HAS_MATPLOTLIB = False
 
 # ------------------------------
+# Constants
+# ------------------------------
+
+CONFIG_DIR = "~/.config/headless-dxf2gcode"
+
+# ------------------------------
 # Utilities
 # ------------------------------
 
 
 def load_config(path: str = "config.yaml") -> dict:
-    """Load configuration from YAML file."""
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-        except Exception as e:
-            print(f"Failed to read config {path}: {e}")
+    """Load configuration from YAML file.
+
+    Search order for relative paths:
+    1. Current working directory
+    2. ~/.config/headless-dxf2gcode/
+    3. Script directory (same as main.py)
+    """
+    if os.path.isabs(path):
+        # Absolute path - use directly
+        config_path = path
+    else:
+        # Relative path - search in multiple locations
+        search_paths = [
+            os.path.join(os.getcwd(), path),  # Current directory
+            os.path.join(os.path.expanduser(CONFIG_DIR), path),  # User config
+            os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), path
+            ),  # Script directory
+        ]
+
+        config_path = None
+        for candidate in search_paths:
+            if os.path.exists(candidate):
+                config_path = candidate
+                break
+
+        if config_path is None:
+            # No config found in any location
             return {}
-    return {}
+
+    try:
+        with open(str(config_path), "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        print(f"Failed to read config {config_path}: {e}")
+        return {}
 
 
 def insert_file_content(out_file, path: str):
@@ -807,8 +840,23 @@ def process_single_file(
     # start with optional preamble content
     header_lines = []
     if config.get("preamble"):
-        if os.path.exists(config["preamble"]):
-            with open(config["preamble"], "r", encoding="utf-8") as f:
+        preamble_path = config["preamble"]
+        # Search for preamble file in multiple locations if relative path
+        if not os.path.isabs(preamble_path):
+            search_paths = [
+                os.path.join(os.getcwd(), preamble_path),
+                os.path.join(os.path.expanduser(CONFIG_DIR), preamble_path),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), preamble_path),
+            ]
+            found_path = None
+            for candidate in search_paths:
+                if os.path.exists(candidate):
+                    found_path = candidate
+                    break
+            preamble_path = found_path if found_path else preamble_path
+
+        if os.path.exists(preamble_path):
+            with open(preamble_path, "r", encoding="utf-8") as f:
                 header_lines.extend([ln.rstrip("\n") for ln in f.readlines()])
         else:
             header_lines.append(
@@ -817,8 +865,25 @@ def process_single_file(
 
     footer_lines = []
     if config.get("postamble"):
-        if os.path.exists(config["postamble"]):
-            with open(config["postamble"], "r", encoding="utf-8") as f:
+        postamble_path = config["postamble"]
+        # Search for postamble file in multiple locations if relative path
+        if not os.path.isabs(postamble_path):
+            search_paths = [
+                os.path.join(os.getcwd(), postamble_path),
+                os.path.join(os.path.expanduser(CONFIG_DIR), postamble_path),
+                os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)), postamble_path
+                ),
+            ]
+            found_path = None
+            for candidate in search_paths:
+                if os.path.exists(candidate):
+                    found_path = candidate
+                    break
+            postamble_path = found_path if found_path else postamble_path
+
+        if os.path.exists(postamble_path):
+            with open(postamble_path, "r", encoding="utf-8") as f:
                 footer_lines.extend([ln.rstrip("\n") for ln in f.readlines()])
         else:
             footer_lines.append(
