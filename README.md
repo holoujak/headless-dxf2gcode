@@ -6,7 +6,7 @@
 
 A headless (command-line) DXF to G-code converter with intelligent optimizations designed to minimize machine jerkiness and improve CNC machining quality.
 
-## 🌟 Key Features
+## Key Features
 
 - **G-code Optimization**: Reduces machine jerking by up to 50% through advanced path optimization
 - **Contour Ordering**: Automatically mills inner shapes first, outer perimeter last
@@ -17,7 +17,7 @@ A headless (command-line) DXF to G-code converter with intelligent optimizations
 - **Multi-format Support**: Lines, polylines, circles, arcs from DXF files
 - **Visual Feedback**: Interactive plotting with numbered milling sequence visualization
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -100,7 +100,7 @@ optimization:
 4. **Adaptive Feedrates**: Slower speeds for short segments, full speed for long runs
 5. **Contour Ordering**: Sorts shapes by size to mill inner contours first, outer perimeter last
 
-## 🛠️ Development
+## Development
 
 ### Setup Development Environment
 
@@ -122,7 +122,7 @@ This project uses several tools to maintain code quality:
 - **pytest**: Testing framework
 - **pre-commit**: Git hooks for quality checks
 
-## 📈 Usage Examples
+## Usage Examples
 
 ### Roughing Operations
 ```yaml
@@ -158,25 +158,25 @@ tool_side: "center"  # Buffer out+in for smoothing, returns to original size
 # Note: Optimizations still apply to create smooth continuous paths
 ```
 
-## 🔧 Command Line Options
+## Command Line Options
 
 ```
 usage: headless-dxf2gcode [-h] [--config CONFIG] [--origin-lower-left]
                           [--plot] [--line-numbers] [--no-optimize] input output
 
 positional arguments:
-  input                Input DXF file
-  output               Output G-code file
+  input                Input DXF file/folder
+  output               Output G-code file/folder
 
 options:
   --config CONFIG      YAML config file (default: config.yaml)
   --origin-lower-left  Shift origin to lower-left corner
-  --plot               Show visualization with milling order numbers
+  --plot               Show visualization with milling order numbers (invalid for bulk conversion)
   --line-numbers       Enable N-line numbering
   --no-optimize        Disable G-code optimizations
 ```
 
-## 📊 Visualization
+## Visualization
 
 The `--plot` option provides interactive visualization showing:
 
@@ -187,9 +187,9 @@ The `--plot` option provides interactive visualization showing:
 
 Each contour is numbered according to its milling order (smallest to largest area), making it easy to verify the machining sequence before running on your CNC machine.
 
-## 🧪 Testing
+This option is invalid in case of bulk conversion - input and output folders specified.
 
-## 📋 Requirements
+## Requirements
 
 - Python 3.8+
 - ezdxf (DXF file reading)
@@ -197,25 +197,6 @@ Each contour is numbered according to its milling order (smallest to largest are
 - PyYAML (Configuration)
 - matplotlib (Optional, for plotting)
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Run pre-commit checks
-5. Submit a pull request
-
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Built for CNC machining optimization
-- Inspired by the need for smoother machine operation
-- Uses advanced computational geometry algorithms
-
-## 📞 Support
-
-- 🐛 Issues: Use GitHub Issues for bug reports
-- 💡 Features: Submit feature requests via GitHub Issues
