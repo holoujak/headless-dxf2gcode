@@ -47,7 +47,33 @@ headless-dxf2gcode input.dxf output.gcode --plot
 ```
 ## Configuration
 
-The converter uses a flexible YAML configuration system with organized sections:
+### Configuration File Locations
+
+Configuration files (`config.yaml`, `preamble`, `postamble`) are searched in the following order (first match wins):
+
+1. **Current working directory** - Project-specific configuration (highest priority)
+2. **`~/.config/headless-dxf2gcode/`** - User-wide configuration
+3. **Script directory** - Default/fallback configuration (where `main.py` is installed)
+
+**Example structure:**
+```bash
+# User-wide configuration (shared across all projects)
+~/.config/headless-dxf2gcode/
+├── config.yaml
+├── start.gcode
+└── end.gcode
+
+# Project-specific configuration (overrides user config)
+./my-project/
+├── input.dxf
+├── config.yaml         # Optional: overrides ~/.config settings
+├── start.gcode         # Optional: project-specific preamble
+└── end.gcode           # Optional: project-specific postamble
+```
+
+**Note:** Absolute paths in configuration always take precedence and bypass the search mechanism.
+
+### Configuration Options
 
 ```yaml
 # File Input/Output
