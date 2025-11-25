@@ -646,6 +646,17 @@ def generate_gcode_from_polygons(
     base_feed = cfg.get("feed_rate", 1000)
     max_cut_depth = cfg.get("tool_max_cut_depth_per_pass", 1.0)
 
+    # CNC limits
+    cnc_limits = cfg.get("cnc_limits", {})
+
+    def is_within_cnc_limits(x: float, y: float) -> bool:
+        """Check if coordinates are within CNC machine limits."""
+        if not cnc_limits.get("enable", False):
+            return True
+        x_max = cnc_limits.get("x_max", 1000)
+        y_max = cnc_limits.get("y_max", 1000)
+        return x <= x_max and y <= y_max
+
     # Optimization settings
     opt_cfg = cfg.get("optimization", {})
     optimization_enabled = opt_cfg.get("enable", True)
@@ -660,6 +671,13 @@ def generate_gcode_from_polygons(
         emit(
             f"(Optimization enabled: merge_tol={merge_tolerance}, "
             f"min_seg={min_segment_length}, dp_tol={douglas_peucker_tolerance})"
+        )
+
+    # CNC limits info
+    if cnc_limits.get("enable", False):
+        emit(
+            f"(CNC Limits: X0-{cnc_limits.get('x_max', 1000)}, "
+            f"Y0-{cnc_limits.get('y_max', 1000)})"
         )
 
     # Display milling order info (polygons are already sorted in main())
@@ -696,16 +714,42 @@ def generate_gcode_from_polygons(
                 if len(exterior) < 2:
                     continue
 
-            # Move to safe height and XY start
+            # Check if start point is within CNC limits
             x0, y0 = exterior[0]
+            if not is_within_cnc_limits(x0, y0):
+                emit(
+                    f"(Skipping contour {i} - start point X{x0:.4f} "
+                    f"Y{y0:.4f} outside CNC limits)"
+                )
+                continue
+
+            # Move to safe height and XY start
             emit(f"G0 Z{z_safe:.3f} F{z_travel}")
             emit(f"G0 X{x0:.4f} Y{y0:.4f} F{z_travel}")
             emit(f"G1 Z{current_height:.4f} F{z_approach}")
 
-            # Follow exterior points with adaptive feedrate
+            # Follow exterior points with adaptive feedrate and CNC limits checking
             prev_x, prev_y = x0, y0
+            cutting_active = True
 
             for x, y in exterior[1:]:
+                # Check if point is within CNC limits
+                if not is_within_cnc_limits(x, y):
+                    if cutting_active:
+                        # Lift to safe height before skipping
+                        emit(f"G0 Z{z_safe:.3f} F{z_travel}")
+                        emit(f"(Skipping point X{x:.4f} Y{y:.4f} - outside CNC limits)")
+                        cutting_active = False
+                    continue
+
+                # If we were skipping points, resume cutting
+                if not cutting_active:
+                    emit(f"G0 X{x:.4f} Y{y:.4f} F{z_travel}")
+                    emit(f"G1 Z{current_height:.4f} F{z_approach}")
+                    cutting_active = True
+                    prev_x, prev_y = x, y
+                    continue
+
                 # Calculate feedrate based on segment length if adaptive mode is enabled
                 if optimization_enabled and adaptive_feedrate:
                     segment_length = math.sqrt((x - prev_x) ** 2 + (y - prev_y) ** 2)
@@ -718,8 +762,9 @@ def generate_gcode_from_polygons(
 
                 prev_x, prev_y = x, y
 
-            # Retract
-            emit(f"G0 Z{z_safe:.3f} F{z_travel}")
+            # Retract only if we're still cutting
+            if cutting_active:
+                emit(f"G0 Z{z_safe:.3f} F{z_travel}")
 
         # Next depth pass
         if current_height == z_work:
