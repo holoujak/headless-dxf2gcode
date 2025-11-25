@@ -148,6 +148,28 @@ def extract_geometries(dxf_path: str) -> List:
             x1, y1 = float(e.dxf.start[0]), float(e.dxf.start[1])
             x2, y2 = float(e.dxf.end[0]), float(e.dxf.end[1])
             geoms.append(LineString([(x1, y1), (x2, y2)]))
+        elif et == "SPLINE":
+            # Handle B-spline curves by approximating with line segments
+            try:
+                # Get spline points - ezdxf can flattening splines to line segments
+                points = []
+                if hasattr(e, "flattening"):
+                    # Modern ezdxf API
+                    for point in e.flattening(distance=0.1):  # 0.1mm resolution
+                        points.append((float(point[0]), float(point[1])))
+                elif hasattr(e, "control_points"):
+                    # Fallback: use control points directly (less accurate)
+                    for cp in e.control_points:
+                        points.append((float(cp[0]), float(cp[1])))
+                else:
+                    # Last resort: try to get any points
+                    points = [(float(p[0]), float(p[1])) for p in e.get_points()]
+
+                if len(points) >= 2:
+                    geoms.append(LineString(points))
+            except Exception as ex:
+                print(f"Warning: Failed to process SPLINE: {ex}")
+                continue
         elif et in ("LWPOLYLINE", "POLYLINE"):
             pts = []
             try:
