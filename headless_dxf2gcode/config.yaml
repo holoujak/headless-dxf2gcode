@@ -36,6 +36,14 @@ tool_side: "left" # Tool compensation: "left", "right", or "center" (center = bu
 tool_max_cut_depth_per_pass: 9 # Maximum cut depth per pass (mm)
 
 # ----------------------
+# CNC Machine Limits
+# ----------------------
+cnc_limits:
+  enable: true # Enable CNC machine limits checking
+  x_max: 2800 # Maximum X coordinate (mm)
+  y_max: 1184 # Maximum Y coordinate (mm)
+
+# ----------------------
 # Path Generation
 # ----------------------
 buffer_resolution: 16 # Number of segments to approximate rounded corners/curves
