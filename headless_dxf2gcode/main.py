@@ -137,6 +137,87 @@ def insert_file_content(out_file, path: str):
 # ------------------------------
 
 
+def calculate_arc_from_bulge(
+    p1: Tuple[float, float], p2: Tuple[float, float], bulge: float
+) -> List[Tuple[float, float]]:
+    """Calculate arc points from two points and bulge value using DXF standard.
+
+    Bulge = tan(included_angle/4), where included_angle is the angle
+    subtended by the arc. Positive bulge = counterclockwise arc, negative =
+    clockwise.
+    """
+    x1, y1 = p1
+    x2, y2 = p2
+
+    # If bulge is zero, return straight line
+    if abs(bulge) < 1e-10:
+        return [p1, p2]
+
+    # Calculate chord length and direction
+    chord_dx = x2 - x1
+    chord_dy = y2 - y1
+    chord_length = math.sqrt(chord_dx * chord_dx + chord_dy * chord_dy)
+
+    if chord_length < 1e-10:
+        return [p1, p2]
+
+    # Calculate the included angle from bulge
+    # bulge = tan(included_angle / 4)
+    included_angle = 4.0 * math.atan(abs(bulge))
+
+    # Calculate radius using chord length and included angle
+    # radius = chord_length / (2 * sin(included_angle / 2))
+    half_angle = included_angle / 2.0
+    radius = chord_length / (2.0 * math.sin(half_angle))
+
+    # Calculate chord midpoint
+    mid_x = (x1 + x2) / 2.0
+    mid_y = (y1 + y2) / 2.0
+
+    # Calculate distance from chord midpoint to arc center
+    # This is: radius * cos(included_angle / 2) - chord_length / 2
+    center_offset = radius * math.cos(half_angle)
+
+    # Unit vector perpendicular to chord (pointing toward center)
+    # Rotate chord vector 90 degrees
+    perp_x = -chord_dy / chord_length
+    perp_y = chord_dx / chord_length
+
+    # Direction of center depends on bulge sign
+    if bulge < 0:  # Clockwise - center on other side
+        perp_x = -perp_x
+        perp_y = -perp_y
+
+    # Calculate arc center
+    center_x = mid_x + center_offset * perp_x
+    center_y = mid_y + center_offset * perp_y
+
+    # Calculate start and end angles
+    start_angle = math.atan2(y1 - center_y, x1 - center_x)
+    end_angle = math.atan2(y2 - center_y, x2 - center_x)
+
+    # Determine direction and adjust end angle
+    if bulge > 0:  # Counter-clockwise
+        while end_angle <= start_angle:
+            end_angle += 2.0 * math.pi
+    else:  # Clockwise
+        while end_angle >= start_angle:
+            end_angle -= 2.0 * math.pi
+
+    # Generate arc points
+    segments = max(8, int(abs(included_angle) / (math.pi / 16)))
+    points = []
+
+    for i in range(segments + 1):
+        t = float(i) / float(segments)
+        angle = start_angle + t * (end_angle - start_angle)
+        x = center_x + radius * math.cos(angle)
+        y = center_y + radius * math.sin(angle)
+        points.append((x, y))
+
+    return points
+
+
 def extract_geometries(dxf_path: str) -> List:
     """Return list of shapely geometries representing continuous entities."""
     doc = ezdxf.readfile(dxf_path)
@@ -171,18 +252,101 @@ def extract_geometries(dxf_path: str) -> List:
                 print(f"Warning: Failed to process SPLINE: {ex}")
                 continue
         elif et in ("LWPOLYLINE", "POLYLINE"):
+            # Check if polyline is closed using multiple methods
+            closed_attr = getattr(e, "closed", False)
+            closed_flag = False
+            if hasattr(e, "dxf") and hasattr(e.dxf, "flags"):
+                closed_flag = bool(e.dxf.flags & 1)  # Bit 0 = closed
+            is_closed_polyline = closed_attr or closed_flag
+
             pts = []
             try:
-                for p in e.get_points():
-                    pts.append((float(p[0]), float(p[1])))
-            except Exception:
-                # fallback for old API
-                for p in e.points():
-                    pts.append((float(p[0]), float(p[1])))
+                # Try to use ezdxf's built-in flattening for polylines with bulges
+                if hasattr(e, "flattening"):
+                    # Modern ezdxf - handles bulges automatically
+                    for point in e.flattening(distance=0.1):
+                        pts.append((float(point[0]), float(point[1])))
+                elif hasattr(e, "get_points"):
+                    # Try get_points but check for bulge values
+                    try:
+                        points_with_bulge = list(e.get_points(format="xyseb"))
+                        if points_with_bulge and len(points_with_bulge[0]) >= 5:
+                            # Points include bulge - need to expand arcs
+                            for i, point_data in enumerate(points_with_bulge):
+                                x, y, start_width, end_width, bulge = point_data[:5]
+                                pts.append((float(x), float(y)))
+
+                                # If there's a bulge and next point exists, create arc
+                                if (
+                                    abs(bulge) > 1e-10
+                                    and i < len(points_with_bulge) - 1
+                                ):
+                                    next_point = points_with_bulge[i + 1]
+                                    x2, y2 = float(next_point[0]), float(next_point[1])
+
+                                    # Calculate arc points from bulge
+                                    arc_pts = calculate_arc_from_bulge(
+                                        (float(x), float(y)), (x2, y2), bulge
+                                    )
+                                    pts.extend(
+                                        arc_pts[1:-1]
+                                    )  # Skip start/end to avoid duplicates
+                        else:
+                            # No bulge data, use simple points
+                            for p in e.get_points():
+                                pts.append((float(p[0]), float(p[1])))
+                    except Exception as get_points_ex:
+                        print(f"Warning: get_points failed: {get_points_ex}")
+                        pts = []
+                elif hasattr(e, "vertices"):
+                    # Access vertices directly and check for bulge - same as
+                    # INSERT block processing
+                    vertices = list(e.vertices)
+                    for i, vertex in enumerate(vertices):
+                        if hasattr(vertex, "dxf") and hasattr(vertex.dxf, "location"):
+                            loc = vertex.dxf.location
+                            x, y = float(loc[0]), float(loc[1])
+                            pts.append((x, y))
+
+                            # Check for bulge in vertex
+                            bulge = getattr(vertex.dxf, "bulge", 0.0)
+
+                            # Determine next vertex for bulge calculation
+                            next_vertex = None
+                            if i < len(vertices) - 1:
+                                # Normal case: next vertex in sequence
+                                next_vertex = vertices[i + 1]
+                            elif is_closed_polyline and i == len(vertices) - 1:
+                                # Closed polyline: last vertex connects to first vertex
+                                next_vertex = vertices[0]
+
+                            if abs(bulge) > 1e-10 and next_vertex is not None:
+                                if hasattr(next_vertex, "dxf") and hasattr(
+                                    next_vertex.dxf, "location"
+                                ):
+                                    next_loc = next_vertex.dxf.location
+                                    x2, y2 = float(next_loc[0]), float(next_loc[1])
+
+                                    # Calculate arc points from bulge using
+                                    # corrected algorithm
+                                    arc_pts = calculate_arc_from_bulge(
+                                        (x, y), (x2, y2), bulge
+                                    )
+                                    pts.extend(
+                                        arc_pts[1:-1]
+                                    )  # Skip start/end to avoid duplicates
+                elif hasattr(e, "points"):
+                    # Fallback for older API without bulge support
+                    for p in e.points():
+                        pts.append((float(p[0]), float(p[1])))
+            except Exception as poly_ex:
+                print(f"Warning: Failed to process POLYLINE: {poly_ex}")
+                continue
+
             if len(pts) < 2:
                 continue
             # If polyline is closed, create Polygon, else LineString
-            is_closed = getattr(e, "closed", False) or (pts[0] == pts[-1])
+            is_closed = is_closed_polyline or (pts[0] == pts[-1])
             if is_closed:
                 geoms.append(Polygon(pts))
             else:
@@ -220,6 +384,379 @@ def extract_geometries(dxf_path: str) -> List:
                 for t in range(segments + 1)
             ]
             geoms.append(LineString(pts))
+        elif et == "INSERT":
+            # Handle block inserts (references)
+            try:
+                # Get the block reference
+                block_name = e.dxf.name
+                insert_point = (float(e.dxf.insert[0]), float(e.dxf.insert[1]))
+
+                # Get transformation parameters
+                scale_x = float(getattr(e.dxf, "xscale", 1.0))
+                scale_y = float(getattr(e.dxf, "yscale", 1.0))
+                rotation = math.radians(float(getattr(e.dxf, "rotation", 0.0)))
+
+                # Get the block definition
+                try:
+                    block_def = doc.blocks[block_name]
+                    print(f"Block '{block_name}' contains {len(block_def)} entities")
+
+                    # Process each entity in the block
+                    for block_entity in block_def:
+                        block_et = block_entity.dxftype()
+                        print(f"  Processing block entity: {block_et}")
+                        block_geom = None
+
+                        # Process block entity (same logic as main entities)
+                        if block_et == "LINE":
+                            x1, y1 = float(block_entity.dxf.start[0]), float(
+                                block_entity.dxf.start[1]
+                            )
+                            x2, y2 = float(block_entity.dxf.end[0]), float(
+                                block_entity.dxf.end[1]
+                            )
+                            block_geom = LineString([(x1, y1), (x2, y2)])
+                        elif block_et == "SPLINE":
+                            points = []
+                            try:
+                                if hasattr(block_entity, "flattening"):
+                                    for point in block_entity.flattening(distance=0.1):
+                                        points.append(
+                                            (float(point[0]), float(point[1]))
+                                        )
+                                elif hasattr(block_entity, "control_points"):
+                                    for cp in block_entity.control_points:
+                                        points.append((float(cp[0]), float(cp[1])))
+                                else:
+                                    points = [
+                                        (float(p[0]), float(p[1]))
+                                        for p in block_entity.get_points()
+                                    ]
+                                if len(points) >= 2:
+                                    block_geom = LineString(points)
+                            except Exception as spline_ex:
+                                print(
+                                    f"    Warning: Failed to process SPLINE "
+                                    f"in block: {spline_ex}"
+                                )
+                        elif block_et in ("LWPOLYLINE", "POLYLINE"):
+                            pts = []
+                            try:
+                                # Try to use ezdxf's built-in flattening for
+                                # polylines with bulges
+
+                                if hasattr(block_entity, "flattening"):
+                                    # Modern ezdxf - handles bulges automatically
+                                    print(
+                                        f"    Using flattening() for block "
+                                        f"{block_et}"
+                                    )
+                                    try:
+                                        for point in block_entity.flattening(
+                                            distance=0.1
+                                        ):
+                                            pts.append(
+                                                (float(point[0]), float(point[1]))
+                                            )
+                                        print(
+                                            f"    Flattening generated "
+                                            f"{len(pts)} points"
+                                        )
+                                    except Exception as flatten_ex:
+                                        print(f"    Flattening failed: {flatten_ex}")
+                                        raise
+                                elif hasattr(block_entity, "get_points"):
+                                    # Try get_points but check for bulge values
+                                    print("    Block entity has get_points " "method")
+                                    print(
+                                        f"    Trying get_points with format for "
+                                        f"block {block_et}"
+                                    )
+                                    try:
+                                        points_with_bulge = list(
+                                            block_entity.get_points(format="xyseb")
+                                        )
+                                        print(
+                                            f"    Got {len(points_with_bulge)} "
+                                            f"points with xyseb format"
+                                        )
+                                        if points_with_bulge:
+                                            print(
+                                                f"    First point data: "
+                                                f"{points_with_bulge[0]} "
+                                                f"(len: {len(points_with_bulge[0])})"
+                                            )
+                                    except Exception as format_ex:
+                                        print(f"    xyseb format failed: {format_ex}")
+                                        points_with_bulge = []
+
+                                    if (
+                                        points_with_bulge
+                                        and len(points_with_bulge[0]) >= 5
+                                    ):
+                                        print(
+                                            "    Processing block points with "
+                                            "bulge data"
+                                        )
+                                        # Points include bulge - need to expand arcs
+                                        for i, point_data in enumerate(
+                                            points_with_bulge
+                                        ):
+                                            (
+                                                x,
+                                                y,
+                                                start_width,
+                                                end_width,
+                                                bulge,
+                                            ) = point_data[:5]
+                                            print(
+                                                f"      Point {i}: ({x:.3f}, "
+                                                f"{y:.3f}) bulge={bulge:.6f}"
+                                            )
+                                            pts.append((float(x), float(y)))
+
+                                            # If there's a bulge and next point
+                                            # exists, create arc
+                                            if (
+                                                abs(bulge) > 1e-10
+                                                and i < len(points_with_bulge) - 1
+                                            ):
+                                                next_point = points_with_bulge[i + 1]
+                                                x2, y2 = (
+                                                    float(next_point[0]),
+                                                    float(next_point[1]),
+                                                )
+                                                print(
+                                                    f"      Creating arc from "
+                                                    f"({x:.3f},{y:.3f}) to "
+                                                    f"({x2:.3f},{y2:.3f}) with "
+                                                    f"bulge {bulge:.6f}"
+                                                )
+
+                                                # Calculate arc points from bulge
+                                                arc_pts = calculate_arc_from_bulge(
+                                                    (float(x), float(y)),
+                                                    (x2, y2),
+                                                    bulge,
+                                                )
+                                                print(
+                                                    f"      Arc generated "
+                                                    f"{len(arc_pts)} points"
+                                                )
+                                                pts.extend(
+                                                    arc_pts[1:-1]
+                                                )  # Skip start/end to avoid duplicates
+                                    else:
+                                        print(
+                                            "    No bulge data found, using "
+                                            "simple points"
+                                        )
+                                        # No bulge data, use simple points
+                                        for p in block_entity.get_points():
+                                            pts.append((float(p[0]), float(p[1])))
+                                elif hasattr(block_entity, "vertices"):
+                                    # Access vertices directly and check for bulge
+                                    vertices = list(block_entity.vertices)
+                                    for i, vertex in enumerate(vertices):
+                                        if hasattr(vertex, "dxf") and hasattr(
+                                            vertex.dxf, "location"
+                                        ):
+                                            loc = vertex.dxf.location
+                                            x, y = float(loc[0]), float(loc[1])
+                                            pts.append((x, y))
+
+                                            # Check for bulge in vertex
+                                            bulge = getattr(vertex.dxf, "bulge", 0.0)
+                                            if (
+                                                abs(bulge) > 1e-10
+                                                and i < len(vertices) - 1
+                                            ):
+                                                next_vertex = vertices[i + 1]
+                                                if hasattr(
+                                                    next_vertex, "dxf"
+                                                ) and hasattr(
+                                                    next_vertex.dxf, "location"
+                                                ):
+                                                    next_loc = next_vertex.dxf.location
+                                                    x2, y2 = (
+                                                        float(next_loc[0]),
+                                                        float(next_loc[1]),
+                                                    )
+
+                                                    # Calculate arc points from
+                                                    # bulge using corrected
+                                                    # algorithm
+                                                    arc_pts = calculate_arc_from_bulge(
+                                                        (x, y), (x2, y2), bulge
+                                                    )
+                                                    pts.extend(
+                                                        arc_pts[1:-1]
+                                                    )  # Skip start/end to avoid
+                                                    # duplicates
+                                elif hasattr(block_entity, "points"):
+                                    # Fallback for older API without bulge support
+                                    points_list = list(block_entity.points())
+                                    for i, p in enumerate(points_list):
+                                        pts.append((float(p[0]), float(p[1])))
+                            except Exception as poly_ex:
+                                print(
+                                    f"    Warning: Failed to get polyline "
+                                    f"points: {poly_ex}"
+                                )
+                                # Fallback: simple point extraction
+                                try:
+                                    for p in block_entity.points():
+                                        pts.append((float(p[0]), float(p[1])))
+                                except Exception:
+                                    continue
+
+                            if len(pts) >= 2:
+                                is_closed = getattr(block_entity, "closed", False) or (
+                                    pts[0] == pts[-1]
+                                )
+                                if is_closed:
+                                    block_geom = Polygon(pts)
+                                else:
+                                    block_geom = LineString(pts)
+                        elif block_et == "VERTEX":
+                            # VERTEX entities are usually part of POLYLINE,
+                            # but handle standalone ones
+                            try:
+                                if hasattr(block_entity, "dxf") and hasattr(
+                                    block_entity.dxf, "location"
+                                ):
+                                    loc = block_entity.dxf.location
+                                    # For standalone vertex, create a small point
+                                    # (you might want to collect these)
+                                    x, y = float(loc[0]), float(loc[1])
+                                    # Create tiny circle around vertex point
+                                    block_geom = Polygon(
+                                        [
+                                            (x - 0.01, y - 0.01),
+                                            (x + 0.01, y - 0.01),
+                                            (x + 0.01, y + 0.01),
+                                            (x - 0.01, y + 0.01),
+                                        ]
+                                    )
+                                    print(
+                                        f"    Processed standalone VERTEX at "
+                                        f"({x:.3f}, {y:.3f})"
+                                    )
+                            except Exception as vertex_ex:
+                                print(
+                                    f"    Warning: Failed to process "
+                                    f"VERTEX: {vertex_ex}"
+                                )
+                        elif block_et == "CIRCLE":
+                            cx, cy = float(block_entity.dxf.center[0]), float(
+                                block_entity.dxf.center[1]
+                            )
+                            r = float(block_entity.dxf.radius)
+                            block_geom = Polygon(
+                                LineString(
+                                    [
+                                        (cx + math.cos(a) * r, cy + math.sin(a) * r)
+                                        for a in [
+                                            i * 2 * math.pi / 64 for i in range(64)
+                                        ]
+                                    ]
+                                ).coords
+                            )
+                        elif block_et == "ARC":
+                            cx, cy = float(block_entity.dxf.center[0]), float(
+                                block_entity.dxf.center[1]
+                            )
+                            r = float(block_entity.dxf.radius)
+                            start_ang, end_ang = float(
+                                block_entity.dxf.start_angle
+                            ), float(block_entity.dxf.end_angle)
+                            sa = math.radians(start_ang)
+                            ea = math.radians(end_ang)
+                            if ea <= sa:
+                                ea += 2 * math.pi
+                            segments = max(6, int((ea - sa) / (math.pi / 16)))
+                            pts = [
+                                (
+                                    (cx + math.cos(sa + t * (ea - sa) / segments) * r),
+                                    (cy + math.sin(sa + t * (ea - sa) / segments) * r),
+                                )
+                                for t in range(segments + 1)
+                            ]
+                            block_geom = LineString(pts)
+                        elif block_et == "INSERT":
+                            # Nested block reference - recursive processing
+                            print(
+                                f"    Warning: Nested INSERT "
+                                f"'{block_entity.dxf.name}' - not fully "
+                                f"implemented"
+                            )
+                            # You could recursively process this, but beware of
+                            # infinite loops
+                        else:
+                            # Unknown entity type in block
+                            print(f"    Skipping unsupported block entity: {block_et}")
+                            continue
+
+                        # Apply transformation to block geometry
+                        if block_geom and not block_geom.is_empty:
+                            try:
+                                # Transform coordinates: scale, rotate, translate
+                                transformed_coords = []
+
+                                if hasattr(block_geom, "coords"):
+                                    # LineString
+                                    coords_list = list(block_geom.coords)
+                                elif hasattr(block_geom, "exterior"):
+                                    # Polygon
+                                    coords_list = list(block_geom.exterior.coords)
+                                else:
+                                    continue
+
+                                for x, y in coords_list:
+                                    # Scale
+                                    x_scaled = x * scale_x
+                                    y_scaled = y * scale_y
+
+                                    # Rotate
+                                    x_rotated = x_scaled * math.cos(
+                                        rotation
+                                    ) - y_scaled * math.sin(rotation)
+                                    y_rotated = x_scaled * math.sin(
+                                        rotation
+                                    ) + y_scaled * math.cos(rotation)
+
+                                    # Translate
+                                    x_final = x_rotated + insert_point[0]
+                                    y_final = y_rotated + insert_point[1]
+
+                                    transformed_coords.append((x_final, y_final))
+
+                                # Create transformed geometry
+                                if len(transformed_coords) >= 2:
+                                    if isinstance(block_geom, Polygon):
+                                        geoms.append(Polygon(transformed_coords))
+                                    else:
+                                        geoms.append(LineString(transformed_coords))
+                                    print(
+                                        f"    Successfully processed and "
+                                        f"transformed {block_et}"
+                                    )
+                            except Exception as transform_ex:
+                                print(
+                                    f"    Warning: Failed to transform "
+                                    f"geometry: {transform_ex}"
+                                )
+
+                except KeyError:
+                    # Block not found
+                    available_blocks = [block.name for block in doc.blocks]
+                    print(f"Warning: Block '{block_name}' not found in document")
+                    print(f"Available blocks: {available_blocks}")
+                    continue
+
+            except Exception as ex:
+                print(f"Warning: Failed to process INSERT '{block_name}': {ex}")
+                continue
         else:
             # ignore other entities for now
             continue
@@ -792,12 +1329,18 @@ def plot_polygons(original_geoms, compensated_polys, sorted_polys=None):
     # original
     for g in original_geoms:
         try:
-            xs, ys = g.xy if hasattr(g, "xy") else zip(*list(g.exterior.coords))
-        except Exception:
-            try:
+            # Try different approaches based on geometry type
+            if hasattr(g, "exterior"):
+                # Polygon
+                xs, ys = zip(*list(g.exterior.coords))
+            elif hasattr(g, "coords"):
+                # LineString
                 xs, ys = zip(*list(g.coords))
-            except Exception:
+            else:
                 continue
+        except Exception as e:
+            print(f"Failed to extract coordinates from geometry {type(g)}: {e}")
+            continue
         ax.plot(
             xs,
             ys,
